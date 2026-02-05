@@ -45,7 +45,7 @@ def main() -> int:
             print("--install is only supported on Windows")
             return 1
 
-        from .windows_integration import WindowsStartupManager
+        from .windows import WindowsStartupManager
 
         manager = WindowsStartupManager()
         if manager.create_start_menu_shortcut():

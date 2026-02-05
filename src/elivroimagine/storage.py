@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import StorageConfig
-from .utilities import check_disk_space
+from .utils import check_disk_space
 
 logger = logging.getLogger(__name__)
 

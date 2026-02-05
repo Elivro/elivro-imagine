@@ -46,11 +46,11 @@ The app follows an event-driven architecture with `ElivroImagineApp` (app.py) as
 - `recorder.py`: Audio capture via sounddevice at 16kHz mono
 - `transcriber.py`: Local Whisper inference (faster-whisper) with lazy model loading
 - `storage.py`: Markdown files with YAML frontmatter at `~/.elivroimagine/transcriptions/`
-- `paster.py`: Clipboard paste via Win32 API (ctypes) + Ctrl+V simulation (pynput). Saves/restores clipboard.
+- `clipboard.py`: Clipboard paste via Win32 API (ctypes) + Ctrl+V simulation (pynput). Saves/restores clipboard.
 - `tray.py`: System tray via pystray with recording state indicator
-- `settings_ui.py`: tkinter settings window launched from tray
-- `utilities.py`: SingleInstanceLock (file-based, cross-platform), disk space checks
-- `windows_integration.py`: Windows autostart (registry) and Start Menu shortcut (pywin32)
+- `settings.py`: tkinter settings window launched from tray
+- `utils.py`: SingleInstanceLock (file-based, cross-platform), disk space checks
+- `windows.py`: Windows autostart (registry) and Start Menu shortcut (pywin32)
 
 **Threading Model**: Main thread runs event loop. Hotkey listener, tray icon, and transcription each run in separate daemon threads. Transcriptions are submitted to a bounded ThreadPoolExecutor (max 2 workers). Settings window runs in its own thread to avoid blocking.
 

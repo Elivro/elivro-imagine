@@ -1,4 +1,4 @@
-"""Tests for paster module."""
+"""Tests for clipboard module."""
 
 import sys
 from unittest.mock import MagicMock, patch
@@ -11,14 +11,14 @@ class TestPasterInit:
 
     def test_default_restore_clipboard_is_false(self) -> None:
         """Default restore_clipboard should be False to keep transcription in clipboard."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster()
         assert paster.restore_clipboard is False
 
     def test_enable_restore_clipboard(self) -> None:
         """Can enable restore_clipboard."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster(restore_clipboard=True)
         assert paster.restore_clipboard is True
@@ -29,7 +29,7 @@ class TestPasterPasteText:
 
     def test_paste_empty_text_returns_false(self) -> None:
         """Pasting empty text returns False."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster()
         result = paster.paste_text("")
@@ -38,7 +38,7 @@ class TestPasterPasteText:
     @patch.object(sys, "platform", "linux")
     def test_paste_on_non_windows_returns_false(self) -> None:
         """Pasting on non-Windows returns False."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster()
         result = paster.paste_text("test")
@@ -47,7 +47,7 @@ class TestPasterPasteText:
     @patch.object(sys, "platform", "win32")
     def test_paste_calls_clipboard_and_simulate(self) -> None:
         """Paste sets clipboard and simulates Ctrl+V."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster()
 
@@ -63,7 +63,7 @@ class TestPasterPasteText:
     @patch.object(sys, "platform", "win32")
     def test_paste_restores_clipboard_when_enabled(self) -> None:
         """Paste restores clipboard when restore_clipboard is True."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster(restore_clipboard=True)
 
@@ -81,7 +81,7 @@ class TestPasterPasteText:
     @patch.object(sys, "platform", "win32")
     def test_paste_no_restore_when_disabled(self) -> None:
         """Paste does not restore clipboard when restore_clipboard is False."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster(restore_clipboard=False)
 
@@ -97,7 +97,7 @@ class TestPasterPasteText:
     @patch.object(sys, "platform", "win32")
     def test_paste_fails_when_set_clipboard_fails(self) -> None:
         """Paste returns False when clipboard cannot be set."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster()
 
@@ -108,7 +108,7 @@ class TestPasterPasteText:
     @patch.object(sys, "platform", "win32")
     def test_paste_fails_when_verification_fails(self) -> None:
         """Paste returns False when clipboard verification fails."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster()
 
@@ -124,7 +124,7 @@ class TestPasterSimulateCtrlV:
     @patch.object(sys, "platform", "win32")
     def test_simulate_ctrl_v_uses_sendinput(self) -> None:
         """Simulate Ctrl+V uses SendInput API."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster()
 
@@ -148,7 +148,7 @@ class TestPasterClipboard:
     @patch.object(sys, "platform", "win32")
     def test_set_clipboard_with_retry_retries_on_failure(self) -> None:
         """Set clipboard retries on failure."""
-        from elivroimagine.paster import Paster
+        from elivroimagine.clipboard import Paster
 
         paster = Paster()
 

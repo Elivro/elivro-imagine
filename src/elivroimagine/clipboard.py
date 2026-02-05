@@ -1,4 +1,4 @@
-"""Clipboard paste functionality using pyperclip for reliability."""
+"""Clipboard paste functionality via Win32 API."""
 
 import logging
 import sys

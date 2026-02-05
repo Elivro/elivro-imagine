@@ -15,14 +15,14 @@ from .classifier import ClassificationError, classify_transcription
 from .config import Config
 from .devtracker import DevTrackerClient, DevTrackerError, find_duplicate_task
 from .hotkey import HotkeyListener
-from .paster import Paster
+from .clipboard import Paster
 from .recorder import AudioRecorder
-from .settings_ui import SettingsWindow
+from .settings import SettingsWindow
 from .sounds import init_mixer, play_start_sound, play_stop_sound
 from .storage import InsufficientDiskSpaceError, StorageManager
 from .transcriber import Transcriber, TranscriptionTimeoutError
 from .tray import SystemTray
-from .utilities import SingleInstanceLock
+from .utils import SingleInstanceLock
 
 if TYPE_CHECKING:
     from .splash import SplashScreen
@@ -841,7 +841,7 @@ class ElivroImagineApp:
 
         # Update Windows autostart setting
         if sys.platform == "win32":
-            from .windows_integration import WindowsStartupManager
+            from .windows import WindowsStartupManager
 
             manager = WindowsStartupManager()
             if config.startup.start_with_windows:

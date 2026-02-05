@@ -209,13 +209,14 @@ src/elivroimagine/
   transcriber.py      # Whisper inference (faster-whisper)
   classifier.py       # Task classification via Berget AI (Mistral)
   devtracker.py       # DevTracker REST API client
-  paster.py           # Clipboard paste via Win32 API
+  clipboard.py        # Clipboard paste via Win32 API
   storage.py          # Markdown file storage
   tray.py             # System tray icon (pystray)
-  settings_ui.py      # Settings window (tkinter)
+  settings.py         # Settings window (tkinter)
   splash.py           # Startup splash screen
-  utilities.py        # Single-instance lock, disk checks
-  windows_integration.py  # Autostart, Start Menu shortcut
+  sounds.py           # Audio feedback (pygame)
+  utils.py            # Single-instance lock, disk checks
+  windows.py          # Autostart, Start Menu shortcut
   sounds/             # Recording feedback sounds
   assets/             # App icon (PNG, ICO)
 ```

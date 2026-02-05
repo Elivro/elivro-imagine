@@ -1,4 +1,4 @@
-"""Windows integration for ElivroImagine."""
+"""Windows autostart and Start Menu integration for ElivroImagine."""
 
 import logging
 import os

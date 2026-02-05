@@ -1,4 +1,4 @@
-"""Tests for Windows integration functionality."""
+"""Tests for Windows integration module."""
 
 import os
 import sys
@@ -19,7 +19,7 @@ class TestWindowsStartupManager:
 
     def test_get_pythonw_path_returns_valid_path(self) -> None:
         """_get_pythonw_path should return a valid Python path."""
-        from elivroimagine.windows_integration import WindowsStartupManager
+        from elivroimagine.windows import WindowsStartupManager
 
         manager = WindowsStartupManager()
         path = manager._get_pythonw_path()
@@ -29,7 +29,7 @@ class TestWindowsStartupManager:
 
     def test_get_launch_command_contains_module(self) -> None:
         """_get_launch_command should contain -m elivroimagine."""
-        from elivroimagine.windows_integration import WindowsStartupManager
+        from elivroimagine.windows import WindowsStartupManager
 
         manager = WindowsStartupManager()
         command = manager._get_launch_command()
@@ -38,7 +38,7 @@ class TestWindowsStartupManager:
 
     def test_is_autostart_enabled_returns_bool(self) -> None:
         """is_autostart_enabled should return a boolean."""
-        from elivroimagine.windows_integration import WindowsStartupManager
+        from elivroimagine.windows import WindowsStartupManager
 
         manager = WindowsStartupManager()
         result = manager.is_autostart_enabled()
@@ -47,7 +47,7 @@ class TestWindowsStartupManager:
 
     def test_enable_disable_autostart_roundtrip(self) -> None:
         """enable_autostart and disable_autostart should work together."""
-        from elivroimagine.windows_integration import WindowsStartupManager
+        from elivroimagine.windows import WindowsStartupManager
 
         manager = WindowsStartupManager()
 
@@ -73,7 +73,7 @@ class TestWindowsStartupManager:
 
     def test_disable_autostart_succeeds_when_not_enabled(self) -> None:
         """disable_autostart should succeed even if not enabled."""
-        from elivroimagine.windows_integration import WindowsStartupManager
+        from elivroimagine.windows import WindowsStartupManager
 
         manager = WindowsStartupManager()
 
@@ -91,7 +91,7 @@ class TestStartMenuShortcut:
     def test_create_start_menu_shortcut_requires_pywin32(self) -> None:
         """create_start_menu_shortcut should handle missing pywin32."""
         # This test just verifies the method doesn't crash
-        from elivroimagine.windows_integration import WindowsStartupManager
+        from elivroimagine.windows import WindowsStartupManager
 
         manager = WindowsStartupManager()
         result = manager.create_start_menu_shortcut()
@@ -102,7 +102,7 @@ class TestStartMenuShortcut:
     @patch.dict(os.environ, {"APPDATA": ""})
     def test_create_start_menu_shortcut_no_appdata(self) -> None:
         """create_start_menu_shortcut should fail gracefully without APPDATA."""
-        from elivroimagine.windows_integration import WindowsStartupManager
+        from elivroimagine.windows import WindowsStartupManager
 
         manager = WindowsStartupManager()
         result = manager.create_start_menu_shortcut()
@@ -115,13 +115,13 @@ class TestConstants:
 
     def test_registry_key_is_correct(self) -> None:
         """REGISTRY_KEY should point to Run key."""
-        from elivroimagine.windows_integration import REGISTRY_KEY
+        from elivroimagine.windows import REGISTRY_KEY
 
         assert "Run" in REGISTRY_KEY
         assert "CurrentVersion" in REGISTRY_KEY
 
     def test_app_name_is_set(self) -> None:
         """APP_NAME should be ElivroImagine."""
-        from elivroimagine.windows_integration import APP_NAME
+        from elivroimagine.windows import APP_NAME
 
         assert APP_NAME == "ElivroImagine"

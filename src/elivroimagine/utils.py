@@ -1,4 +1,4 @@
-"""Production utilities for ElivroImagine."""
+"""Utility functions and classes for ElivroImagine."""
 
 import logging
 import os

@@ -1,11 +1,11 @@
-"""Tests for production utilities module."""
+"""Tests for utils module."""
 
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from elivroimagine.utilities import SingleInstanceLock, check_disk_space
+from elivroimagine.utils import SingleInstanceLock, check_disk_space
 
 
 class TestSingleInstanceLock:
@@ -116,7 +116,7 @@ class TestCheckDiskSpace:
 
     def test_handles_disk_usage_error(self, tmp_path: Path) -> None:
         """Handles shutil.disk_usage failure gracefully."""
-        with patch("elivroimagine.utilities.shutil.disk_usage", side_effect=OSError):
+        with patch("elivroimagine.utils.shutil.disk_usage", side_effect=OSError):
             has_space, available_mb = check_disk_space(tmp_path, required_mb=100)
             # Should fail-open
             assert has_space is True
