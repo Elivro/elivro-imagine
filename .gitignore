@@ -45,3 +45,6 @@ nul
 # Project specific
 *.mp3
 !src/elivroimagine/sounds/*.mp3
+
+# env
+.env

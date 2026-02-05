@@ -4,6 +4,7 @@ import logging
 import subprocess
 import sys
 import threading
+from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -14,6 +15,9 @@ if TYPE_CHECKING:
     from .app import ElivroImagineApp
 
 logger = logging.getLogger(__name__)
+
+# Icon size for tray (larger for better quality on high-DPI displays)
+ICON_SIZE = 128
 
 
 class SystemTray:
@@ -38,72 +42,117 @@ class SystemTray:
 
         self._icon: Icon | None = None
         self._recording = False
-        self._icon_idle = self._create_icon("#4CAF50")  # Green
-        self._icon_recording = self._create_icon("#F44336")  # Red
+        self._transcribing = False
+        self._base_icon = self._load_base_icon()
+        self._icon_idle = self._base_icon.copy()
+        self._icon_recording = self._create_status_icon("#F44336")  # Red
+        self._icon_transcribing = self._create_status_icon("#FF9800")  # Orange
 
-    def _create_icon(self, color: str) -> Image.Image:
-        """Create a simple circular icon.
-
-        Args:
-            color: Hex color for the icon.
+    def _load_base_icon(self) -> Image.Image:
+        """Load the base icon from assets.
 
         Returns:
-            PIL Image.
+            PIL Image resized to tray icon size.
         """
-        size = 64
-        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(image)
+        try:
+            # Try to load from package assets
+            assets_path = Path(__file__).parent / "assets" / "icon.png"
+            if assets_path.exists():
+                icon = Image.open(assets_path)
+                icon = icon.convert("RGBA")
 
-        # Draw filled circle
+                # Create a white circular background for visibility
+                background = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
+                draw = ImageDraw.Draw(background)
+                # Draw white circle as background
+                margin = 2
+                draw.ellipse(
+                    [margin, margin, ICON_SIZE - margin, ICON_SIZE - margin],
+                    fill="#FFFFFF",
+                )
+
+                # Resize logo to fit inside the circle, preserving aspect ratio
+                available = ICON_SIZE - 24  # padding inside circle
+                src_w, src_h = icon.size
+                ratio = min(available / src_w, available / src_h)
+                new_w = int(src_w * ratio)
+                new_h = int(src_h * ratio)
+                icon = icon.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+                # Center the logo on the background
+                ox = (ICON_SIZE - new_w) // 2
+                oy = (ICON_SIZE - new_h) // 2
+                background.paste(icon, (ox, oy), icon)
+
+                return background
+        except Exception as e:
+            logger.warning(f"Failed to load icon from assets: {e}")
+
+        # Fallback to simple generated icon
+        return self._create_fallback_icon()
+
+    def _create_fallback_icon(self) -> Image.Image:
+        """Create a simple fallback icon if logo not found."""
+        image = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
         margin = 4
         draw.ellipse(
-            [margin, margin, size - margin, size - margin],
-            fill=color,
-            outline="#FFFFFF",
+            [margin, margin, ICON_SIZE - margin, ICON_SIZE - margin],
+            fill="#FFFFFF",
+            outline="#000000",
             width=2,
         )
-
-        # Draw microphone symbol (simplified)
-        mic_color = "#FFFFFF"
-        center_x = size // 2
-        center_y = size // 2
-
-        # Microphone body
-        draw.rectangle(
-            [center_x - 6, center_y - 12, center_x + 6, center_y + 4],
-            fill=mic_color,
-        )
-        # Microphone base
-        draw.arc(
-            [center_x - 10, center_y - 2, center_x + 10, center_y + 14],
-            start=0,
-            end=180,
-            fill=mic_color,
-            width=2,
-        )
-        # Stand
-        draw.line(
-            [center_x, center_y + 12, center_x, center_y + 18],
-            fill=mic_color,
-            width=2,
-        )
-        draw.line(
-            [center_x - 6, center_y + 18, center_x + 6, center_y + 18],
-            fill=mic_color,
-            width=2,
-        )
-
         return image
+
+    def _create_status_icon(self, badge_color: str) -> Image.Image:
+        """Create an icon with a colored status badge.
+
+        Args:
+            badge_color: Hex color for the status badge.
+
+        Returns:
+            PIL Image with status badge overlay.
+        """
+        icon = self._base_icon.copy()
+        draw = ImageDraw.Draw(icon)
+
+        # Draw status badge in bottom-right corner
+        badge_size = 20
+        badge_x = ICON_SIZE - badge_size - 2
+        badge_y = ICON_SIZE - badge_size - 2
+
+        # Badge with white border
+        draw.ellipse(
+            [badge_x - 2, badge_y - 2, badge_x + badge_size + 2, badge_y + badge_size + 2],
+            fill="#FFFFFF",
+        )
+        draw.ellipse(
+            [badge_x, badge_y, badge_x + badge_size, badge_y + badge_size],
+            fill=badge_color,
+        )
+
+        return icon
 
     def _open_transcriptions_folder(self) -> None:
         """Open transcriptions folder in file explorer."""
-        folder = str(self.transcriptions_folder)
-        if sys.platform == "win32":
-            subprocess.Popen(["explorer", folder])
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", folder])
-        else:
-            subprocess.Popen(["xdg-open", folder])
+        folder = self.transcriptions_folder
+
+        if not folder.exists():
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.error(f"Failed to create folder: {e}")
+                return
+
+        try:
+            if sys.platform == "win32":
+                subprocess.Popen(["explorer", str(folder)])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(folder)])
+            else:
+                subprocess.Popen(["xdg-open", str(folder)])
+        except Exception as e:
+            logger.error(f"Failed to open folder: {e}")
 
     def _create_menu(self) -> Menu:
         """Create the tray menu."""
@@ -111,7 +160,7 @@ class SystemTray:
             MenuItem("ElivroImagine", None, enabled=False),
             Menu.SEPARATOR,
             MenuItem("Open Transcriptions", lambda: self._open_transcriptions_folder()),
-            MenuItem("Settings", lambda: self.on_settings()),
+            MenuItem("Settings", lambda: self.on_settings(), default=True),
             Menu.SEPARATOR,
             MenuItem("Quit", lambda: self._quit()),
         )
@@ -152,6 +201,24 @@ class SystemTray:
             if recording:
                 self._icon.icon = self._icon_recording
                 self._icon.title = "ElivroImagine - Recording..."
+            elif self._transcribing:
+                self._icon.icon = self._icon_transcribing
+                self._icon.title = "ElivroImagine - Transcribing..."
+            else:
+                self._icon.icon = self._icon_idle
+                self._icon.title = "ElivroImagine - Ready"
+
+    def set_transcribing(self, transcribing: bool) -> None:
+        """Update icon to show transcription in progress.
+
+        Args:
+            transcribing: True if transcribing, False otherwise.
+        """
+        self._transcribing = transcribing
+        if self._icon and not self._recording:
+            if transcribing:
+                self._icon.icon = self._icon_transcribing
+                self._icon.title = "ElivroImagine - Transcribing..."
             else:
                 self._icon.icon = self._icon_idle
                 self._icon.title = "ElivroImagine - Ready"

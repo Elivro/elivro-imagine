@@ -4,16 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ElivroImagine is a Windows voice-to-backlog tool that records voice notes via global hotkey, transcribes them locally with OpenAI Whisper, and saves to markdown files. Transcriptions are processed into structured tasks manually via Claude Code (no API costs).
+ElivroImagine is a Windows voice-to-backlog tool that records voice notes via global hotkey, transcribes them locally with OpenAI Whisper, and saves to markdown files. A second "paste" hotkey mode records, transcribes, and pastes text directly into the focused field. Transcriptions are processed into structured tasks manually via Claude Code (no API costs).
 
 ## Commands
 
 ```bash
-# Install (editable mode)
-pip install -e .
+# Install (editable mode, with dev deps)
+pip install -e ".[dev]"
 
 # Run the app
 python -m elivroimagine
+
+# Run all tests
+python -m pytest tests/
+
+# Run a single test file
+python -m pytest tests/test_config.py -v
+
+# Run a single test class or method
+python -m pytest tests/test_app.py::TestRecordingConflictGuard -v
+python -m pytest tests/test_app.py::TestRecordingConflictGuard::test_save_blocks_paste -v
 
 # Prerequisites: FFmpeg required for Whisper
 winget install FFmpeg
@@ -23,25 +33,33 @@ winget install FFmpeg
 
 The app follows an event-driven architecture with `ElivroImagineApp` (app.py) as the central orchestrator.
 
-**Data Flow**: Hotkey press → AudioRecorder captures audio → Transcriber converts to text → StorageManager saves markdown
+**Data Flows**:
+- **Save mode**: Hotkey press → AudioRecorder → Transcriber → StorageManager saves markdown
+- **Paste mode**: Paste hotkey press → AudioRecorder → Transcriber → Paster pastes into focused field via clipboard + Ctrl+V
+
+**Recording Ownership**: Both hotkeys share a single AudioRecorder. A `_recording_lock` + `_active_recording_source` field (`"save"` | `"paste"` | `None`) prevents simultaneous recordings. Whichever hotkey starts first owns the recorder until it stops.
 
 **Component Responsibilities**:
 - `app.py`: Orchestrates all components, handles callbacks between them, manages threading
 - `config.py`: Dataclass-based config with YAML persistence at `~/.elivroimagine/config.yaml`
-- `hotkey.py`: Global hotkey via pynput with hold/toggle modes
-- `recorder.py`: Audio capture via soundcard library at 16kHz mono
-- `transcriber.py`: Local Whisper inference with lazy model loading
+- `hotkey.py`: Global hotkey via pynput with hold/toggle modes, supports both keyboard and mouse button combos
+- `recorder.py`: Audio capture via sounddevice at 16kHz mono
+- `transcriber.py`: Local Whisper inference (faster-whisper) with lazy model loading
 - `storage.py`: Markdown files with YAML frontmatter at `~/.elivroimagine/transcriptions/`
+- `paster.py`: Clipboard paste via Win32 API (ctypes) + Ctrl+V simulation (pynput). Saves/restores clipboard.
 - `tray.py`: System tray via pystray with recording state indicator
 - `settings_ui.py`: tkinter settings window launched from tray
+- `utilities.py`: SingleInstanceLock (file-based, cross-platform), disk space checks
+- `windows_integration.py`: Windows autostart (registry) and Start Menu shortcut (pywin32)
 
-**Threading Model**: Main thread runs event loop. Hotkey listener, tray icon, and transcription each run in separate daemon threads. Settings window runs in its own thread to avoid blocking.
+**Threading Model**: Main thread runs event loop. Hotkey listener, tray icon, and transcription each run in separate daemon threads. Transcriptions are submitted to a bounded ThreadPoolExecutor (max 2 workers). Settings window runs in its own thread to avoid blocking.
 
 **Runtime Files** (created at `~/.elivroimagine/`):
 - `config.yaml` - User settings
 - `transcriptions/*.md` - Voice note transcriptions
 - `transcriptions/archive/` - Processed transcriptions
 - `logs/elivroimagine.log` - Application logs
+- `app.lock` - Single instance lock file
 
 ## Session Startup
 

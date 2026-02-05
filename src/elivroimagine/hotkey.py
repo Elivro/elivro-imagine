@@ -1,17 +1,22 @@
-"""Global hotkey listener using pynput."""
+"""Global hotkey listener using keyboard library for scan code support."""
 
 import logging
 import threading
 import time
 from typing import Callable, Literal
 
-from pynput import keyboard
+import keyboard
+from pynput import mouse
 
 logger = logging.getLogger(__name__)
 
 
 class HotkeyListener:
-    """Listens for global hotkeys."""
+    """Listens for global hotkeys using the keyboard library.
+
+    Supports both key names and scan codes for layout-independent hotkeys.
+    When scan_code is provided, it takes precedence over combination parsing.
+    """
 
     def __init__(
         self,
@@ -19,6 +24,7 @@ class HotkeyListener:
         mode: Literal["hold", "toggle"],
         on_start: Callable[[], None],
         on_stop: Callable[[], None],
+        scan_code: int | None = None,
     ) -> None:
         """Initialize hotkey listener.
 
@@ -27,86 +33,224 @@ class HotkeyListener:
             mode: "hold" (release to stop) or "toggle" (press again to stop).
             on_start: Callback when recording should start.
             on_stop: Callback when recording should stop.
+            scan_code: Optional scan code for the main key (layout-independent).
         """
         self.combination = combination
         self.mode = mode
         self.on_start = on_start
         self.on_stop = on_stop
+        self.scan_code = scan_code
 
-        self._listener: keyboard.GlobalHotKeys | None = None
-        self._key_listener: keyboard.Listener | None = None
+        self._hotkey_id: int | None = None
+        self._mouse_listener: mouse.Listener | None = None
         self._is_active = False
         self._hotkey_pressed = False
         self._lock = threading.Lock()
-        self._last_activation_time: float = 0.0
-        self._debounce_interval: float = 0.3  # 300ms debounce
+        self._last_start_time: float = 0.0
+        self._start_debounce: float = 0.15  # 150ms - prevents double-start
+        self._mouse_button: mouse.Button | None = None
+        self._registered_hooks: list[Callable[..., None]] = []
 
-    def _parse_combination(self) -> set[keyboard.Key | keyboard.KeyCode]:
-        """Parse combination string to key set."""
-        keys: set[keyboard.Key | keyboard.KeyCode] = set()
-        parts = self.combination.lower().split("+")
+    def _is_mouse_hotkey(self) -> bool:
+        """Check if the combination uses a mouse button."""
+        combo_lower = self.combination.lower()
+        return "<mouse" in combo_lower or "<mouse_middle>" in combo_lower
 
-        for part in parts:
-            part = part.strip()
-            if part == "<ctrl>":
-                keys.add(keyboard.Key.ctrl_l)
-            elif part == "<alt>":
-                keys.add(keyboard.Key.alt_l)
-            elif part == "<shift>":
-                keys.add(keyboard.Key.shift_l)
-            elif part.startswith("<") and part.endswith(">"):
-                key_name = part[1:-1]
-                try:
-                    keys.add(getattr(keyboard.Key, key_name))
-                except AttributeError:
-                    keys.add(keyboard.KeyCode.from_char(key_name))
-            else:
-                keys.add(keyboard.KeyCode.from_char(part))
+    def _get_mouse_button(self) -> mouse.Button | None:
+        """Parse mouse button from combination."""
+        combo_lower = self.combination.lower()
+        if "<mouse_middle>" in combo_lower:
+            return mouse.Button.middle
+        elif "<mouse4>" in combo_lower:
+            return mouse.Button.x1
+        elif "<mouse5>" in combo_lower:
+            return mouse.Button.x2
+        return None
 
-        return keys
+    def _get_keyboard_modifiers(self) -> list[str]:
+        """Get modifier key names for the keyboard library."""
+        combo_lower = self.combination.lower()
+        modifiers = []
+        if "<ctrl>" in combo_lower:
+            modifiers.append("ctrl")
+        if "<alt>" in combo_lower:
+            modifiers.append("alt")
+        if "<shift>" in combo_lower:
+            modifiers.append("shift")
+        return modifiers
+
+    def _normalize_combination(self) -> str:
+        """Convert pynput-style combination to keyboard library format.
+
+        Converts: "<ctrl>+<alt>+r" -> "ctrl+alt+r"
+        """
+        combo = self.combination.lower()
+        # Remove angle brackets from modifiers
+        combo = combo.replace("<ctrl>", "ctrl")
+        combo = combo.replace("<alt>", "alt")
+        combo = combo.replace("<shift>", "shift")
+        # Remove angle brackets from function keys like <f1>
+        import re
+        combo = re.sub(r"<(f\d+)>", r"\1", combo)
+        # Remove any remaining angle brackets for single keys
+        combo = re.sub(r"<([^>]+)>", r"\1", combo)
+        return combo
 
     def start(self) -> None:
         """Start listening for hotkeys."""
-        if self._listener is not None:
+        if self._hotkey_id is not None or self._mouse_listener is not None:
             return
 
-        logger.info(f"Starting hotkey listener: {self.combination} (mode: {self.mode})")
+        logger.info(
+            f"Starting hotkey listener: {self.combination} "
+            f"(mode: {self.mode}, scan_code: {self.scan_code})"
+        )
 
-        # Use GlobalHotKeys for simpler handling
-        hotkeys = {self.combination: self._on_hotkey_activate}
-        self._listener = keyboard.GlobalHotKeys(hotkeys)
-        self._listener.start()
+        if self._is_mouse_hotkey():
+            # Mouse button hotkey - use pynput for mouse, keyboard for modifiers
+            self._mouse_button = self._get_mouse_button()
 
-        # Also listen for key releases in hold mode
-        if self.mode == "hold":
-            self._key_listener = keyboard.Listener(on_release=self._on_key_release)
-            self._key_listener.start()
+            self._mouse_listener = mouse.Listener(
+                on_click=self._on_mouse_click,
+            )
+            self._mouse_listener.start()
+        else:
+            # Keyboard-only hotkey
+            if self.scan_code is not None:
+                # Use scan code for the main key
+                modifiers = self._get_keyboard_modifiers()
+                if modifiers:
+                    # Register modifier check on scan code press
+                    hook = keyboard.on_press_key(
+                        self.scan_code,
+                        lambda e: self._on_scancode_press(e, modifiers),
+                        suppress=True,
+                    )
+                    self._registered_hooks.append(hook)
+                else:
+                    # Just the scan code, no modifiers
+                    hook = keyboard.on_press_key(
+                        self.scan_code,
+                        self._on_key_press_event,
+                        suppress=True,
+                    )
+                    self._registered_hooks.append(hook)
+
+                # Register release handler for hold mode
+                if self.mode == "hold":
+                    release_hook = keyboard.on_release_key(
+                        self.scan_code,
+                        self._on_key_release_event,
+                        suppress=True,
+                    )
+                    self._registered_hooks.append(release_hook)
+            else:
+                # Use combination string
+                combo = self._normalize_combination()
+                try:
+                    self._hotkey_id = keyboard.add_hotkey(
+                        combo,
+                        self._on_hotkey_activate,
+                        suppress=True,
+                        trigger_on_release=False,
+                    )
+                except ValueError as e:
+                    logger.error(f"Invalid hotkey combination '{combo}': {e}")
+                    return
+
+                # For hold mode, track key releases
+                if self.mode == "hold":
+                    # Extract the main key (last part of combination)
+                    parts = combo.split("+")
+                    main_key = parts[-1] if parts else combo
+                    release_hook = keyboard.on_release_key(
+                        main_key,
+                        self._on_key_release_event,
+                        suppress=True,
+                    )
+                    self._registered_hooks.append(release_hook)
+
+    def _on_scancode_press(
+        self, event: keyboard.KeyboardEvent, required_modifiers: list[str]
+    ) -> None:
+        """Handle scan code press with modifier check."""
+        # Check if all required modifiers are currently pressed
+        for mod in required_modifiers:
+            if not keyboard.is_pressed(mod):
+                return
+        self._on_hotkey_activate()
+
+    def _on_key_press_event(self, event: keyboard.KeyboardEvent) -> None:
+        """Handle key press event (for scan code without modifiers)."""
+        self._on_hotkey_activate()
+
+    def _on_key_release_event(self, event: keyboard.KeyboardEvent) -> None:
+        """Handle key release for hold mode."""
+        if self.mode != "hold":
+            return
+        self._on_hold_release()
 
     def stop(self) -> None:
         """Stop listening for hotkeys."""
-        if self._listener:
-            self._listener.stop()
-            self._listener = None
+        if self._hotkey_id is not None:
+            try:
+                keyboard.remove_hotkey(self._hotkey_id)
+            except (KeyError, ValueError):
+                pass  # Already removed
+            self._hotkey_id = None
 
-        if self._key_listener:
-            self._key_listener.stop()
-            self._key_listener = None
+        # Remove all registered hooks
+        for hook in self._registered_hooks:
+            try:
+                keyboard.unhook(hook)
+            except (KeyError, ValueError):
+                pass
+        self._registered_hooks.clear()
+
+        if self._mouse_listener:
+            self._mouse_listener.stop()
+            self._mouse_listener = None
 
         self._is_active = False
         self._hotkey_pressed = False
+
+    def _on_mouse_click(
+        self, x: int, y: int, button: mouse.Button, pressed: bool
+    ) -> None:
+        """Handle mouse button clicks for mouse button hotkeys."""
+        if button != self._mouse_button:
+            return
+
+        # Check if required modifiers are pressed using keyboard library
+        modifiers = self._get_keyboard_modifiers()
+        for mod in modifiers:
+            if not keyboard.is_pressed(mod):
+                return
+
+        if pressed:
+            self._on_hotkey_activate()
+        else:
+            if self.mode == "hold" and self._is_active:
+                self._on_hold_release()
+
+    def _on_hold_release(self) -> None:
+        """Handle release in hold mode.
+
+        No debounce on release - the app's duration check (< 0.5s)
+        handles accidental taps.
+        """
+        with self._lock:
+            if self._is_active:
+                self._is_active = False
+                self._hotkey_pressed = False
+                logger.debug("Hold: stopping recording (released)")
+                self.on_stop()
 
     def _on_hotkey_activate(self) -> None:
         """Handle hotkey activation."""
         current_time = time.time()
 
         with self._lock:
-            # Debounce: skip if called within debounce window
-            if current_time - self._last_activation_time < self._debounce_interval:
-                logger.debug("Hotkey activation debounced")
-                return
-
-            self._last_activation_time = current_time
-
             if self.mode == "toggle":
                 if self._is_active:
                     self._is_active = False
@@ -117,67 +261,33 @@ class HotkeyListener:
                     logger.debug("Toggle: starting recording")
                     self.on_start()
             else:  # hold mode
+                # Debounce start only - prevents double-start from rapid press events
+                if current_time - self._last_start_time < self._start_debounce:
+                    logger.debug("Hold start debounced")
+                    return
+
                 if not self._is_active:
+                    self._last_start_time = current_time
                     self._is_active = True
                     self._hotkey_pressed = True
                     logger.debug("Hold: starting recording")
                     self.on_start()
 
-    def _on_key_release(self, key: keyboard.Key | keyboard.KeyCode) -> None:
-        """Handle key release for hold mode."""
-        if self.mode != "hold" or not self._hotkey_pressed:
-            return
-
-        # Check if any modifier key in the combination was released
-        combo_lower = self.combination.lower()
-        released_key_name = ""
-
-        if hasattr(key, "name"):
-            released_key_name = key.name
-        elif hasattr(key, "char"):
-            released_key_name = key.char or ""
-
-        # Check if released key is part of the hotkey
-        is_part_of_combo = False
-        if "ctrl" in combo_lower and "ctrl" in released_key_name:
-            is_part_of_combo = True
-        elif "alt" in combo_lower and "alt" in released_key_name:
-            is_part_of_combo = True
-        elif "shift" in combo_lower and "shift" in released_key_name:
-            is_part_of_combo = True
-        elif released_key_name and f"+{released_key_name}" in combo_lower:
-            is_part_of_combo = True
-        elif released_key_name and combo_lower.endswith(released_key_name):
-            is_part_of_combo = True
-
-        if is_part_of_combo:
-            current_time = time.time()
-
-            with self._lock:
-                # Debounce: skip if called within debounce window
-                if current_time - self._last_activation_time < self._debounce_interval:
-                    logger.debug("Key release debounced")
-                    return
-
-                if self._is_active:
-                    self._last_activation_time = current_time
-                    self._is_active = False
-                    self._hotkey_pressed = False
-                    logger.debug("Hold: stopping recording (key released)")
-                    self.on_stop()
-
-    def update_combination(self, combination: str) -> None:
+    def update_combination(
+        self, combination: str, scan_code: int | None = None
+    ) -> None:
         """Update the hotkey combination."""
-        was_running = self._listener is not None
+        was_running = self._hotkey_id is not None or self._mouse_listener is not None
         if was_running:
             self.stop()
         self.combination = combination
+        self.scan_code = scan_code
         if was_running:
             self.start()
 
     def update_mode(self, mode: Literal["hold", "toggle"]) -> None:
         """Update the recording mode."""
-        was_running = self._listener is not None
+        was_running = self._hotkey_id is not None or self._mouse_listener is not None
         if was_running:
             self.stop()
         self.mode = mode
@@ -188,3 +298,9 @@ class HotkeyListener:
     def is_active(self) -> bool:
         """Check if recording is currently active."""
         return self._is_active
+
+    # Backward compatibility methods for tests
+    def _on_key_release(self, key: object) -> None:
+        """Legacy method for test compatibility - delegates to _on_hold_release."""
+        if self.mode == "hold" and self._hotkey_pressed:
+            self._on_hold_release()

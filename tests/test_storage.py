@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
+from elivroimagine.storage import InsufficientDiskSpaceError
+
 
 class TestStorageManagerSave:
     """Test saving transcriptions."""
@@ -225,3 +227,41 @@ class TestStorageManagerDirectories:
 
         assert new_dir.exists()
         assert (new_dir / "archive").exists()
+
+
+class TestStorageDiskSpaceCheck:
+    """Test disk space checks before saving."""
+
+    def test_save_raises_on_insufficient_space(
+        self, temp_storage_dir: Path
+    ) -> None:
+        """Saving raises InsufficientDiskSpaceError when disk is full."""
+        from elivroimagine.config import StorageConfig
+        from elivroimagine.storage import StorageManager
+
+        config = StorageConfig(transcriptions_dir=str(temp_storage_dir))
+        storage = StorageManager(config)
+
+        with patch(
+            "elivroimagine.storage.check_disk_space",
+            return_value=(False, 5),
+        ):
+            with pytest.raises(InsufficientDiskSpaceError):
+                storage.save_transcription("Test content", 5.0)
+
+    def test_save_succeeds_with_sufficient_space(
+        self, temp_storage_dir: Path
+    ) -> None:
+        """Saving succeeds when there is sufficient disk space."""
+        from elivroimagine.config import StorageConfig
+        from elivroimagine.storage import StorageManager
+
+        config = StorageConfig(transcriptions_dir=str(temp_storage_dir))
+        storage = StorageManager(config)
+
+        with patch(
+            "elivroimagine.storage.check_disk_space",
+            return_value=(True, 5000),
+        ):
+            filepath = storage.save_transcription("Test content", 5.0)
+            assert filepath.exists()

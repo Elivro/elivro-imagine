@@ -1,10 +1,20 @@
 """Storage management for transcriptions."""
 
+import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
 
 from .config import StorageConfig
+from .utilities import check_disk_space
+
+logger = logging.getLogger(__name__)
+
+
+class InsufficientDiskSpaceError(Exception):
+    """Raised when there is not enough disk space to save a transcription."""
+
+    pass
 
 
 class StorageManager:
@@ -18,6 +28,7 @@ class StorageManager:
         """Create necessary directories."""
         self.config.transcriptions_path.mkdir(parents=True, exist_ok=True)
         self.config.archive_path.mkdir(parents=True, exist_ok=True)
+        logger.debug(f"Storage directories verified: {self.config.transcriptions_path}")
 
     def save_transcription(self, text: str, duration: float) -> Path:
         """Save transcription to a markdown file.
@@ -28,7 +39,22 @@ class StorageManager:
 
         Returns:
             Path to the saved file.
+
+        Raises:
+            InsufficientDiskSpaceError: If disk space is below threshold.
         """
+        # Check disk space before writing
+        has_space, available_mb = check_disk_space(
+            self.config.transcriptions_path, required_mb=10
+        )
+        if not has_space:
+            logger.error(
+                f"Insufficient disk space: {available_mb}MB available, need 10MB"
+            )
+            raise InsufficientDiskSpaceError(
+                f"Only {available_mb}MB available. Need at least 10MB."
+            )
+
         timestamp = datetime.now()
         filename = timestamp.strftime("%Y-%m-%d_%H%M%S.md")
         filepath = self.config.transcriptions_path / filename
@@ -38,6 +64,7 @@ class StorageManager:
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
+        logger.info(f"Saved transcription: {filepath.name} ({duration:.1f}s)")
         return filepath
 
     def _format_transcription(
@@ -84,9 +111,26 @@ duration: {formatted_duration}
 
         Returns:
             New path in archive folder.
+
+        Raises:
+            FileNotFoundError: If the source file doesn't exist.
         """
+        if not filepath.exists():
+            raise FileNotFoundError(f"File not found: {filepath}")
+
         archive_path = self.config.archive_path / filepath.name
+
+        # Handle name collisions
+        if archive_path.exists():
+            stem = filepath.stem
+            suffix = filepath.suffix
+            counter = 1
+            while archive_path.exists():
+                archive_path = self.config.archive_path / f"{stem}_{counter}{suffix}"
+                counter += 1
+
         shutil.move(str(filepath), str(archive_path))
+        logger.info(f"Archived transcription: {filepath.name}")
         return archive_path
 
     def archive_all(self) -> list[Path]:
@@ -98,6 +142,7 @@ duration: {formatted_duration}
         archived = []
         for filepath in self.get_transcriptions():
             archived.append(self.archive_transcription(filepath))
+        logger.info(f"Archived {len(archived)} transcriptions")
         return archived
 
     def get_transcriptions_folder(self) -> Path:

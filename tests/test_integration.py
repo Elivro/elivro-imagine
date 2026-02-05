@@ -35,7 +35,7 @@ class TestCompleteRecordingWorkflow:
     def test_complete_recording_workflow(
         self,
         mock_pygame: MagicMock,
-        mock_soundcard: MagicMock,
+        mock_sounddevice: MagicMock,
         mock_whisper: MagicMock,
         mock_pynput: MagicMock,
         temp_storage_dir: Path,
@@ -101,10 +101,7 @@ class TestCompleteRecordingWorkflow:
         assert len(start_called) == 1
         assert len(start_sound_plays) == 1
 
-        # Wait for debounce
-        time.sleep(0.35)
-
-        # Press hotkey to stop
+        # Press hotkey again to stop
         hotkey._on_hotkey_activate()
         time.sleep(0.15)  # Let sound thread execute
 
@@ -132,22 +129,15 @@ class TestCompleteRecordingWorkflow:
             on_stop=lambda: stop_count.append(1),
         )
 
-        # Simulate rapid key presses (within debounce window)
-        for _ in range(5):
-            hotkey._on_hotkey_activate()
+        # First press starts recording
+        hotkey._on_hotkey_activate()
 
-        # Only one start should fire
         assert len(start_count) == 1
         assert len(stop_count) == 0
 
-        # Wait for debounce
-        time.sleep(0.35)
+        # Second press stops recording
+        hotkey._on_hotkey_activate()
 
-        # Now rapid presses to stop
-        for _ in range(5):
-            hotkey._on_hotkey_activate()
-
-        # Only one stop should fire
         assert len(start_count) == 1
         assert len(stop_count) == 1
 
@@ -176,21 +166,18 @@ class TestHoldModeIntegration:
         hotkey._on_hotkey_activate()
         assert len(start_count) == 1
 
-        # Wait for debounce
-        time.sleep(0.35)
-
-        # Release key - should stop
+        # Release key - should stop immediately (no debounce on release)
         mock_key = MagicMock()
         mock_key.name = "ctrl_l"
         hotkey._on_key_release(mock_key)
 
         assert len(stop_count) == 1
 
-    def test_hold_mode_rapid_release_debounced(
+    def test_hold_mode_multiple_releases_only_stop_once(
         self,
         mock_pynput: MagicMock,
     ) -> None:
-        """Hold mode rapid key release is debounced."""
+        """Hold mode only fires stop once even with multiple key releases."""
         from elivroimagine.hotkey import HotkeyListener
 
         start_count = []
@@ -205,15 +192,19 @@ class TestHoldModeIntegration:
 
         # Press hotkey
         hotkey._on_hotkey_activate()
+        assert len(start_count) == 1
 
-        # Rapid key releases (within debounce of press)
-        mock_key = MagicMock()
-        mock_key.name = "ctrl_l"
-        for _ in range(5):
-            hotkey._on_key_release(mock_key)
+        # Multiple key releases (e.g. releasing ctrl then alt)
+        mock_ctrl = MagicMock()
+        mock_ctrl.name = "ctrl_l"
+        mock_alt = MagicMock()
+        mock_alt.name = "alt_l"
 
-        # Stop should be debounced
-        assert len(stop_count) == 0
+        hotkey._on_key_release(mock_ctrl)
+        hotkey._on_key_release(mock_alt)
+
+        # Stop should fire exactly once (second release sees _is_active=False)
+        assert len(stop_count) == 1
 
 
 class TestAppCallbackIntegration:
@@ -222,7 +213,7 @@ class TestAppCallbackIntegration:
     def test_app_callbacks_trigger_correct_sequence(
         self,
         mock_pygame: MagicMock,
-        mock_soundcard: MagicMock,
+        mock_sounddevice: MagicMock,
         mock_whisper: MagicMock,
         mock_pynput: MagicMock,
         temp_storage_dir: Path,

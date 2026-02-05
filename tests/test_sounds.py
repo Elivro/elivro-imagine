@@ -67,11 +67,11 @@ class TestSoundPlayback:
         """Start sound has correct volume applied."""
         sounds, mock_pygame = fresh_sounds_module
 
-        sounds.play_start_sound()
+        sounds.play_start_sound()  # Uses default volume 1.0
         time.sleep(0.15)
 
         mock_sound = mock_pygame.mixer.Sound.return_value
-        mock_sound.set_volume.assert_called_once_with(sounds.START_VOLUME)
+        mock_sound.set_volume.assert_called_once_with(1.0)
 
     def test_stop_sound_volume_is_applied(
         self, fresh_sounds_module: tuple
@@ -79,11 +79,23 @@ class TestSoundPlayback:
         """Stop sound has correct volume applied."""
         sounds, mock_pygame = fresh_sounds_module
 
-        sounds.play_stop_sound()
+        sounds.play_stop_sound()  # Uses default volume 0.7
         time.sleep(0.15)
 
         mock_sound = mock_pygame.mixer.Sound.return_value
-        mock_sound.set_volume.assert_called_once_with(sounds.STOP_VOLUME)
+        mock_sound.set_volume.assert_called_once_with(0.7)
+
+    def test_custom_volume_is_applied(
+        self, fresh_sounds_module: tuple
+    ) -> None:
+        """Custom volume parameter is applied correctly."""
+        sounds, mock_pygame = fresh_sounds_module
+
+        sounds.play_start_sound(volume=0.5)
+        time.sleep(0.15)
+
+        mock_sound = mock_pygame.mixer.Sound.return_value
+        mock_sound.set_volume.assert_called_once_with(0.5)
 
     def test_multiple_plays_each_trigger_once(
         self, fresh_sounds_module: tuple
