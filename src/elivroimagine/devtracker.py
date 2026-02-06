@@ -163,6 +163,60 @@ class DevTrackerClient:
         except requests.RequestException as e:
             raise DevTrackerError(f"Failed to create task: {e}") from e
 
+    def update_task(
+        self,
+        task_id: int,
+        title: str | None = None,
+        description: str | None = None,
+        category: int | None = None,
+        priority: str | None = None,
+        effort: str | None = None,
+    ) -> dict[str, object]:
+        """Update an existing DevTracker task.
+
+        Only sends non-None fields in the payload.
+
+        Args:
+            task_id: ID of the task to update.
+            title: New task title (or None to leave unchanged).
+            description: New task description (or None to leave unchanged).
+            category: New category ID (or None to leave unchanged).
+            priority: New priority level (or None to leave unchanged).
+            effort: New effort level (or None to leave unchanged).
+
+        Returns:
+            Updated task dict from the API.
+
+        Raises:
+            DevTrackerError: If no fields to update or API call fails.
+        """
+        payload: dict[str, object] = {}
+        if title is not None:
+            payload["title"] = title
+        if description is not None:
+            payload["description"] = description
+        if category is not None:
+            payload["category"] = category
+        if priority is not None:
+            payload["priority"] = priority
+        if effort is not None:
+            payload["effort"] = effort
+
+        if not payload:
+            raise DevTrackerError("No fields to update")
+
+        try:
+            resp = self._session.patch(
+                f"{self._base_url}/tasks/{task_id}", json=payload, timeout=15
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            return result.get("task", result)
+        except requests.RequestException as e:
+            raise DevTrackerError(
+                f"Failed to update task #{task_id}: {e}"
+            ) from e
+
     def update_config(self, config: DevTrackerConfig) -> None:
         """Update client configuration (headers, URL). Invalidates category cache."""
         self._config = config

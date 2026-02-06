@@ -473,3 +473,235 @@ class TestDevTrackerProjectOverride:
                 c for c in notify_calls if "intranet" in str(c)
             ]
             assert len(task_created_calls) > 0
+
+
+class TestDevTrackerUpdateFlow:
+    """Test task update flow via voice classification."""
+
+    def test_update_intent_calls_update_task(self, tmp_path: Path) -> None:
+        """Update intent routes to update_task, not create_task."""
+        app = _create_app(tmp_path)
+        app._devtracker = MagicMock()
+        app._devtracker.get_category_id.return_value = None
+        app._devtracker.update_task.return_value = {"id": 42, "title": "Updated"}
+
+        with patch("elivroimagine.app.classify_transcription") as mock_classify:
+            from elivroimagine.classifier import TaskClassification
+
+            mock_classify.return_value = TaskClassification(
+                intent="update",
+                title=None,
+                description=None,
+                category=None,
+                priority="high",
+                effort=None,
+                task_id=42,
+            )
+
+            app._create_devtracker_task("update task 42 priority high")
+
+            app._devtracker.update_task.assert_called_once_with(
+                task_id=42,
+                title=None,
+                description=None,
+                category=None,
+                priority="high",
+                effort=None,
+            )
+            app._devtracker.create_task.assert_not_called()
+
+    def test_update_only_changed_fields_sent(self, tmp_path: Path) -> None:
+        """Only non-None fields appear in the update call."""
+        app = _create_app(tmp_path)
+        app._devtracker = MagicMock()
+        app._devtracker.get_category_id.return_value = 5
+        app._devtracker.update_task.return_value = {"id": 10}
+
+        with patch("elivroimagine.app.classify_transcription") as mock_classify:
+            from elivroimagine.classifier import TaskClassification
+
+            mock_classify.return_value = TaskClassification(
+                intent="update",
+                title="New title",
+                description=None,
+                category="Backend",
+                priority=None,
+                effort=None,
+                task_id=10,
+            )
+
+            app._create_devtracker_task("rename task 10")
+
+            call_kwargs = app._devtracker.update_task.call_args.kwargs
+            assert call_kwargs["title"] == "New title"
+            assert call_kwargs["category"] == 5  # Resolved to ID
+            assert call_kwargs["description"] is None
+            assert call_kwargs["priority"] is None
+            assert call_kwargs["effort"] is None
+
+    def test_update_notification_includes_task_id_and_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """Notification shows task ID and changed field names."""
+        app = _create_app(tmp_path)
+        app._devtracker = MagicMock()
+        app._devtracker.get_category_id.return_value = None
+        app._devtracker.update_task.return_value = {"id": 42}
+        app.config.devtracker.project = "myproject"
+
+        with patch("elivroimagine.app.classify_transcription") as mock_classify:
+            from elivroimagine.classifier import TaskClassification
+
+            mock_classify.return_value = TaskClassification(
+                intent="update",
+                title="New title",
+                description=None,
+                category=None,
+                priority="high",
+                effort=None,
+                task_id=42,
+            )
+
+            app._create_devtracker_task("update task 42")
+
+            notify_calls = app.tray.notify.call_args_list
+            # Find the "Task Updated" notification
+            updated_calls = [
+                c for c in notify_calls if "Task Updated" in str(c.args[0])
+            ]
+            assert len(updated_calls) == 1
+            title_arg = updated_calls[0].args[0]
+            body_arg = updated_calls[0].args[1]
+            assert "myproject" in title_arg
+            assert "#42" in body_arg
+            assert "title" in body_arg
+            assert "priority" in body_arg
+
+    def test_update_category_resolved_when_present(self, tmp_path: Path) -> None:
+        """Category is resolved to ID only when classification has a category."""
+        app = _create_app(tmp_path)
+        app._devtracker = MagicMock()
+        app._devtracker.get_category_id.return_value = 3
+        app._devtracker.update_task.return_value = {"id": 7}
+
+        with patch("elivroimagine.app.classify_transcription") as mock_classify:
+            from elivroimagine.classifier import TaskClassification
+
+            mock_classify.return_value = TaskClassification(
+                intent="update",
+                title=None,
+                description=None,
+                category="Frontend",
+                priority=None,
+                effort=None,
+                task_id=7,
+            )
+
+            app._create_devtracker_task("move task 7 to frontend")
+
+            app._devtracker.get_category_id.assert_called_once_with("Frontend")
+            call_kwargs = app._devtracker.update_task.call_args.kwargs
+            assert call_kwargs["category"] == 3
+
+    def test_update_category_skipped_when_none(self, tmp_path: Path) -> None:
+        """Category ID resolution skipped when classification.category is None."""
+        app = _create_app(tmp_path)
+        app._devtracker = MagicMock()
+        app._devtracker.update_task.return_value = {"id": 8}
+
+        with patch("elivroimagine.app.classify_transcription") as mock_classify:
+            from elivroimagine.classifier import TaskClassification
+
+            mock_classify.return_value = TaskClassification(
+                intent="update",
+                title=None,
+                description=None,
+                category=None,
+                priority="low",
+                effort=None,
+                task_id=8,
+            )
+
+            app._create_devtracker_task("update task 8 priority low")
+
+            app._devtracker.get_category_id.assert_not_called()
+            call_kwargs = app._devtracker.update_task.call_args.kwargs
+            assert call_kwargs["category"] is None
+
+    def test_create_intent_still_works(self, tmp_path: Path) -> None:
+        """Create intent still routes to create_task (regression)."""
+        app = _create_app(tmp_path)
+        app._devtracker = MagicMock()
+        app._devtracker.get_active_and_backlog_tasks.return_value = []
+        app._devtracker.get_category_id.return_value = 1
+        app._devtracker.create_task.return_value = {"id": 50, "title": "New"}
+
+        with patch("elivroimagine.app.classify_transcription") as mock_classify:
+            from elivroimagine.classifier import TaskClassification
+
+            mock_classify.return_value = TaskClassification(
+                intent="create",
+                title="New Task",
+                description="A new task",
+                category="General",
+                priority="medium",
+                effort="small",
+            )
+
+            app._create_devtracker_task("create a new task")
+
+            app._devtracker.create_task.assert_called_once()
+            app._devtracker.update_task.assert_not_called()
+
+    def test_classification_error_shows_notification(self, tmp_path: Path) -> None:
+        """ClassificationError during update shows error notification."""
+        from elivroimagine.classifier import ClassificationError
+
+        app = _create_app(tmp_path)
+        app._devtracker = MagicMock()
+
+        with patch("elivroimagine.app.classify_transcription") as mock_classify:
+            mock_classify.side_effect = ClassificationError(
+                "Update intent requires a task_id"
+            )
+
+            app._create_devtracker_task("update something")
+
+            notify_calls = app.tray.notify.call_args_list
+            error_calls = [
+                c for c in notify_calls if "Error" in str(c.args[0])
+            ]
+            assert len(error_calls) == 1
+            assert "task_id" in str(error_calls[0].args[1])
+
+    def test_devtracker_error_shows_notification(self, tmp_path: Path) -> None:
+        """DevTrackerError during update shows error notification."""
+        from elivroimagine.devtracker import DevTrackerError
+
+        app = _create_app(tmp_path)
+        app._devtracker = MagicMock()
+        app._devtracker.update_task.side_effect = DevTrackerError(
+            "Failed to update task #42: 404"
+        )
+
+        with patch("elivroimagine.app.classify_transcription") as mock_classify:
+            from elivroimagine.classifier import TaskClassification
+
+            mock_classify.return_value = TaskClassification(
+                intent="update",
+                title=None,
+                description=None,
+                category=None,
+                priority="high",
+                effort=None,
+                task_id=42,
+            )
+
+            app._create_devtracker_task("update task 42")
+
+            notify_calls = app.tray.notify.call_args_list
+            error_calls = [
+                c for c in notify_calls if "Error" in str(c.args[0])
+            ]
+            assert len(error_calls) == 1
+            assert "DevTracker" in str(error_calls[0].args[1])

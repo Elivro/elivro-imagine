@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .classifier import ClassificationError, classify_transcription
+from .classifier import ClassificationError, TaskClassification, classify_transcription
 from .config import Config
 from .devtracker import DevTrackerClient, DevTrackerError, find_duplicate_task
 from .hotkey import HotkeyListener
@@ -547,11 +547,11 @@ class ElivroImagineApp:
     def _create_devtracker_task(
         self, text: str, project_override: str | None = None
     ) -> None:
-        """Classify transcription and create a DevTracker task.
+        """Classify transcription and create or update a DevTracker task.
 
         Args:
             text: Transcribed text to classify and submit.
-            project_override: If set, create the task on this project instead of the default.
+            project_override: If set, use this project instead of the default.
         """
         if not self._devtracker:
             return
@@ -569,45 +569,15 @@ class ElivroImagineApp:
                 text, api_key, categories=category_names
             )
             logger.info(
-                f"Classified: '{classification.title}' "
+                f"Classified: intent={classification.intent}, "
+                f"title='{classification.title}' "
                 f"[{classification.category}/{classification.priority}]"
             )
 
-            # Duplicate check
-            existing = self._devtracker.get_active_and_backlog_tasks()
-            duplicate = find_duplicate_task(classification.title, existing)
-            if duplicate:
-                dup_id = duplicate.get("id", "?")
-                dup_title = duplicate.get("title", "")
-                logger.info(f"Duplicate found: #{dup_id} {dup_title}")
-                if self.tray:
-                    self.tray.notify(
-                        "Duplicate Task",
-                        f"Matches #{dup_id}: {dup_title}",
-                    )
-                return
-
-            # Resolve category ID
-            category_id = self._devtracker.get_category_id(classification.category)
-
-            # Create task
-            task = self._devtracker.create_task(
-                title=classification.title,
-                description=classification.description,
-                category=category_id,
-                priority=classification.priority,
-                effort=classification.effort,
-                project_override=project_override,
-            )
-
-            project_label = project_override or self.config.devtracker.project
-            task_id = task.get("id", "?")
-            logger.info(f"Created task #{task_id} ({project_label}): {classification.title}")
-            if self.tray:
-                self.tray.notify(
-                    f"Task Created ({project_label})",
-                    f"#{task_id}: {classification.title}",
-                )
+            if classification.intent == "update":
+                self._update_devtracker_task(classification, project_override)
+            else:
+                self._do_create_devtracker_task(classification, project_override)
 
         except ClassificationError as e:
             logger.error(f"Classification failed: {e}")
@@ -623,6 +593,109 @@ class ElivroImagineApp:
             logger.error(f"Task creation failed: {e}")
             if self.tray:
                 self.tray.notify("ElivroImagine Error", f"Task failed: {e}")
+
+    def _do_create_devtracker_task(
+        self,
+        classification: TaskClassification,
+        project_override: str | None = None,
+    ) -> None:
+        """Create a new DevTracker task from classification.
+
+        Args:
+            classification: Classified task data.
+            project_override: If set, create the task on this project instead of the default.
+        """
+        if not self._devtracker:
+            return
+
+        # Duplicate check
+        existing = self._devtracker.get_active_and_backlog_tasks()
+        duplicate = find_duplicate_task(classification.title, existing)
+        if duplicate:
+            dup_id = duplicate.get("id", "?")
+            dup_title = duplicate.get("title", "")
+            logger.info(f"Duplicate found: #{dup_id} {dup_title}")
+            if self.tray:
+                self.tray.notify(
+                    "Duplicate Task",
+                    f"Matches #{dup_id}: {dup_title}",
+                )
+            return
+
+        # Resolve category ID
+        category_id = self._devtracker.get_category_id(classification.category)
+
+        # Create task
+        task = self._devtracker.create_task(
+            title=classification.title,
+            description=classification.description,
+            category=category_id,
+            priority=classification.priority,
+            effort=classification.effort,
+            project_override=project_override,
+        )
+
+        project_label = project_override or self.config.devtracker.project
+        task_id = task.get("id", "?")
+        logger.info(f"Created task #{task_id} ({project_label}): {classification.title}")
+        if self.tray:
+            self.tray.notify(
+                f"Task Created ({project_label})",
+                f"#{task_id}: {classification.title}",
+            )
+
+    def _update_devtracker_task(
+        self,
+        classification: TaskClassification,
+        project_override: str | None = None,
+    ) -> None:
+        """Update an existing DevTracker task from classification.
+
+        Args:
+            classification: Classified task data with task_id and changed fields.
+            project_override: If set, use this project label in notifications.
+        """
+        if not self._devtracker:
+            return
+
+        # Resolve category ID only if category is being changed
+        category_id: int | None = None
+        if classification.category is not None:
+            category_id = self._devtracker.get_category_id(classification.category)
+
+        # Build list of changed field names for notification
+        changed_fields: list[str] = []
+        if classification.title is not None:
+            changed_fields.append("title")
+        if classification.description is not None:
+            changed_fields.append("description")
+        if classification.category is not None:
+            changed_fields.append("category")
+        if classification.priority is not None:
+            changed_fields.append("priority")
+        if classification.effort is not None:
+            changed_fields.append("effort")
+
+        task = self._devtracker.update_task(
+            task_id=classification.task_id,
+            title=classification.title,
+            description=classification.description,
+            category=category_id,
+            priority=classification.priority,
+            effort=classification.effort,
+        )
+
+        project_label = project_override or self.config.devtracker.project
+        task_id = classification.task_id
+        fields_str = ", ".join(changed_fields)
+        logger.info(
+            f"Updated task #{task_id} ({project_label}): {fields_str}"
+        )
+        if self.tray:
+            self.tray.notify(
+                f"Task Updated ({project_label})",
+                f"#{task_id}: updated {fields_str}",
+            )
 
     def _transcribe_and_create_project_task(
         self, audio: np.ndarray, duration: float, project: str

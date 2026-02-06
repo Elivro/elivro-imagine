@@ -20,7 +20,15 @@ VALID_EFFORTS = ["tiny", "small", "medium", "large", "massive"]
 SYSTEM_PROMPT_TEMPLATE = """\
 You are a task classifier for a software development project.
 
-Given a voice transcription from a developer, extract a structured task.
+Given a voice transcription from a developer, determine the INTENT and extract structured data.
+
+INTENT DETECTION:
+- "create": The user wants to create a NEW task (default if unclear).
+  Keywords: "create", "add", "new task", "make a task", "skapa", "ny uppgift"
+- "update": The user wants to MODIFY an existing task.
+  Keywords: "update", "change", "modify", "edit", "rename", "set priority", "set effort", \
+"move to", "ändra", "uppdatera", "uppgift <number>"
+  The user MUST reference a task number (e.g. "task 42", "uppgift 7", "#42").
 
 IMPORTANT LANGUAGE RULE: If the input is in Swedish or any non-English language, \
 translate it to English first. ALL output fields (title, description) MUST be in English.
@@ -47,8 +55,13 @@ Rules:
 - Category MUST be one of the exact names listed above
 - Respond with JSON ONLY, no markdown fences, no explanation
 
-JSON format:
-{{"title": "...", "description": "...", "category": "...", "priority": "...", "effort": "..."}}
+For CREATE intent, include ALL fields:
+{{"intent": "create", "title": "...", "description": "...", "category": "...", \
+"priority": "...", "effort": "..."}}
+
+For UPDATE intent, include task_id and ONLY the fields being changed:
+{{"intent": "update", "task_id": 42, "priority": "high"}}
+{{"intent": "update", "task_id": 7, "title": "New title", "category": "Backend"}}
 """
 
 
@@ -62,11 +75,13 @@ class ClassificationError(Exception):
 class TaskClassification:
     """Result of classifying a transcription into a task."""
 
-    title: str
-    description: str
-    category: str
-    priority: str
-    effort: str
+    intent: str  # "create" or "update"
+    title: str | None
+    description: str | None
+    category: str | None
+    priority: str | None
+    effort: str | None
+    task_id: int | None = None  # Only set for "update" intent
 
 
 def _fuzzy_match_category(name: str, valid_categories: list[str]) -> str:
@@ -155,6 +170,49 @@ def classify_transcription(
             f"Failed to parse classification JSON: {e}. Raw: {content[:200]}"
         ) from e
 
+    # Determine intent
+    raw_intent = str(parsed.get("intent", "create")).lower().strip()
+    intent = raw_intent if raw_intent in ("create", "update") else "create"
+
+    if intent == "update":
+        # Update: extract task_id (required), only populate changed fields
+        raw_task_id = parsed.get("task_id")
+        if raw_task_id is None:
+            raise ClassificationError(
+                "Update intent requires a task_id (e.g. 'update task 42')"
+            )
+        try:
+            task_id = int(raw_task_id)
+        except (ValueError, TypeError) as e:
+            raise ClassificationError(
+                f"Invalid task_id '{raw_task_id}': must be an integer"
+            ) from e
+
+        title = str(parsed["title"]) if "title" in parsed else None
+        description = str(parsed["description"]) if "description" in parsed else None
+        category = str(parsed["category"]) if "category" in parsed else None
+        priority = str(parsed["priority"]).lower() if "priority" in parsed else None
+        effort = str(parsed["effort"]).lower() if "effort" in parsed else None
+
+        # Validate non-None fields
+        if categories and category is not None and category not in categories:
+            category = _fuzzy_match_category(category, categories)
+        if priority is not None and priority not in VALID_PRIORITIES:
+            priority = "medium"
+        if effort is not None and effort not in VALID_EFFORTS:
+            effort = "medium"
+
+        return TaskClassification(
+            intent="update",
+            title=title,
+            description=description,
+            category=category,
+            priority=priority,
+            effort=effort,
+            task_id=task_id,
+        )
+
+    # Create: all fields populated with defaults
     title = str(parsed.get("title", "Untitled task"))
     description = str(parsed.get("description", ""))
     category = str(parsed.get("category", ""))
@@ -172,6 +230,7 @@ def classify_transcription(
         effort = "medium"
 
     return TaskClassification(
+        intent="create",
         title=title,
         description=description,
         category=category,
